@@ -6,6 +6,8 @@ with training code written for the original U2-Net implementation.
 
 from __future__ import annotations
 
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -218,7 +220,7 @@ class U3Net(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         if x.ndim != 4:
             raise ValueError(f"expected a 4D NCHW tensor, got shape {tuple(x.shape)}")
-        if min(x.shape[-2:]) < 32:
+        if not torch.onnx.is_in_onnx_export() and min(x.shape[-2:]) < 32:
             raise ValueError("input height and width must both be at least 32")
 
         input_size = x.shape[-2:]
@@ -243,9 +245,8 @@ class U3Net(nn.Module):
             for head, feature in zip(self.side_heads, pyramid)
         ]
         weights = self.fusion_logits.softmax(dim=0)
-        fused_logits = self.refine(
-            torch.stack([weight * side for weight, side in zip(weights, side_logits)]).sum(0)
-        )
+        stacked_side_logits = torch.stack(side_logits, dim=0)
+        fused_logits = self.refine((weights.view(-1, 1, 1, 1, 1) * stacked_side_logits).sum(0))
         return tuple(torch.sigmoid(logit) for logit in (fused_logits, *side_logits))
 
 
@@ -266,26 +267,34 @@ if __name__ == "__main__":
 
     dummy_input = torch.randn(1, 3, 600, 600)
 
-    torch.onnx.export(
-        model,
-        dummy_input,
-        "modern_u2net.onnx",
-        input_names=["input"],
-        output_names=["output"],
-        opset_version=17,
-        do_constant_folding=True,
-        dynamic_axes={
-            "input": {
-                0: "batch_size",
-                2: "height",
-                3: "width",
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="You are using the legacy TorchScript-based ONNX export.*",
+            category=DeprecationWarning,
+        )
+        torch.onnx.export(
+            model,
+            dummy_input,
+            "modern_u2net.onnx",
+            dynamo=False,
+            external_data=False,
+            input_names=["input"],
+            output_names=["output"],
+            opset_version=17,
+            do_constant_folding=True,
+            dynamic_axes={
+                "input": {
+                    0: "batch_size",
+                    2: "height",
+                    3: "width",
+                },
+                "output": {
+                    0: "batch_size",
+                    2: "height",
+                    3: "width",
+                },
             },
-            "output": {
-                0: "batch_size",
-                2: "height",
-                3: "width",
-            },
-        },
-    )
+        )
 
     print("ONNX 모델 저장 완료: modern_u2net.onnx")

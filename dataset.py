@@ -1,3 +1,8 @@
+import io
+import os
+
+os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
+
 import pyarrow.parquet as pq
 from tqdm import tqdm
 import numpy as np
@@ -5,6 +10,7 @@ import cv2
 import albumentations as A
 import torch
 from albumentations.pytorch import ToTensorV2
+from PIL import Image
 from torch.utils.data import Dataset
 
 
@@ -92,18 +98,26 @@ class HumanSegDataset(Dataset):
     @staticmethod
     def _decode(data: bytes, flag: int, name: str) -> np.ndarray:
         array = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), flag)
-        if array is None:
-            raise ValueError(f"{name} 데이터를 디코딩하지 못했습니다.")
-        return array
+        if array is not None:
+            return array
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                if flag == cv2.IMREAD_COLOR:
+                    array = np.array(image.convert("RGB"))
+                    return cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
+                return np.array(image)
+        except Exception as exc:
+            raise ValueError(f"{name} 데이터를 디코딩하지 못했습니다.") from exc
+
+    def _preprocess_data(self, image_bytes: bytes, mask_bytes: bytes) -> tuple[torch.Tensor, torch.Tensor]:
         image = self._decode(
-            self.images[index].as_py(),
+            image_bytes,
             cv2.IMREAD_COLOR,
             "image",
         )
         mask = self._decode(
-            self.masks[index].as_py(),
+            mask_bytes,
             cv2.IMREAD_UNCHANGED,
             "mask",
         )
@@ -134,6 +148,12 @@ class HumanSegDataset(Dataset):
             mask = mask.unsqueeze(0)
 
         return image.contiguous(), mask.contiguous()
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        return self._preprocess_data(
+            self.images[index].as_py(),
+            self.masks[index].as_py(),
+        )
 
 
 def visualize_mask(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
