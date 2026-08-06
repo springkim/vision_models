@@ -276,7 +276,7 @@ if __name__ == "__main__":
         torch.onnx.export(
             model,
             dummy_input,
-            "modern_u2net.onnx",
+            "modern_u3net.onnx",
             dynamo=False,
             external_data=False,
             input_names=["input"],
@@ -297,4 +297,4 @@ if __name__ == "__main__":
             },
         )
 
-    print("ONNX 모델 저장 완료: modern_u2net.onnx")
+    print("ONNX 모델 저장 완료: modern_u3net.onnx")

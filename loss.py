@@ -36,18 +36,22 @@ class BCEDiceLoss(nn.Module):
                 f"prediction and target shapes differ: {prediction.shape} != {target.shape}"
             )
 
-        prediction = prediction.float().clamp(self.eps, 1.0 - self.eps)
-        target = target.float()
+        # PyTorch intentionally rejects BCELoss while autocast is active.  This
+        # model returns sigmoid probabilities (not logits), so keep BCE and the
+        # numerically sensitive Dice reductions in an explicit FP32 region.
+        with torch.autocast(device_type=prediction.device.type, enabled=False):
+            prediction = prediction.float().clamp(self.eps, 1.0 - self.eps)
+            target = target.float()
 
-        bce = nn.functional.binary_cross_entropy(prediction, target)
-        dims = tuple(range(1, prediction.ndim))
-        intersection = (prediction * target).sum(dim=dims)
-        denominator = prediction.sum(dim=dims) + target.sum(dim=dims)
-        dice = (2.0 * intersection + self.smooth) / (denominator + self.smooth)
-        dice_loss = 1.0 - dice.mean()
+            bce = nn.functional.binary_cross_entropy(prediction, target)
+            dims = tuple(range(1, prediction.ndim))
+            intersection = (prediction * target).sum(dim=dims)
+            denominator = prediction.sum(dim=dims) + target.sum(dim=dims)
+            dice = (2.0 * intersection + self.smooth) / (denominator + self.smooth)
+            dice_loss = 1.0 - dice.mean()
 
-        normalizer = self.bce_weight + self.dice_weight
-        return (self.bce_weight * bce + self.dice_weight * dice_loss) / normalizer
+            normalizer = self.bce_weight + self.dice_weight
+            return (self.bce_weight * bce + self.dice_weight * dice_loss) / normalizer
 
 
 class DeepSupervisionLoss(nn.Module):
@@ -87,4 +91,3 @@ class DeepSupervisionLoss(nn.Module):
             for weight, prediction in zip(weights, predictions)
         ]
         return torch.stack(losses).sum() / sum(weights)
-

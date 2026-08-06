@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 from pathlib import Path
+
+# Some newer AMD GPUs do not yet have a packaged MIOpen Find-Db entry.  FAST
+# avoids the solver benchmarking path (EvaluateInvokers) on a database miss and
+# falls back to immediate mode instead.  Set these before importing torch so
+# they are visible when MIOpen is initialized.  Existing user settings win.
+os.environ.setdefault("MIOPEN_FIND_MODE", "FAST")
+os.environ.setdefault("MIOPEN_LOG_LEVEL", "3")
 
 import numpy as np
 import torch
@@ -168,6 +176,10 @@ def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        # On ROCm this API is backed by MIOpen.  Benchmarking repeats the solver
+        # search that FAST mode above is intended to avoid.
+        torch.backends.cudnn.benchmark = False
     amp_enabled = device.type == "cuda" and not args.no_amp
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -190,7 +202,8 @@ def main() -> None:
 
     print(
         f"device={device}, train={len(train_loader.dataset)}, "
-        f"valid={len(valid_loader.dataset)}, amp={amp_enabled}"
+        f"valid={len(valid_loader.dataset)}, amp={amp_enabled}, "
+        f"miopen_find_mode={os.environ['MIOPEN_FIND_MODE']}"
     )
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(
