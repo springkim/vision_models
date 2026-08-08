@@ -24,7 +24,7 @@ from model import U3Net, modern_u2net_tiny
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Modern U2Net")
+    parser = argparse.ArgumentParser(description="Train Modern U3Net")
     parser.add_argument("--data", type=str, default="humanseg.parquet")
     parser.add_argument("--output-dir", type=str, default="checkpoints")
     parser.add_argument("--epochs", type=int, default=50)
